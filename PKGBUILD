@@ -1,4 +1,4 @@
-# Maintainer: Fahry <fahry@example.com>
+# Maintainer: Fahry <farhannzarm@gmail.com>
 # Upstream: https://github.com/Diegiwg/PrismLauncher-Cracked
 
 pkgname=prismlauncher-cracked-bin
@@ -21,45 +21,25 @@ provides=('prismlauncher')
 conflicts=('prismlauncher' 'prismlauncher-bin' 'prismlauncher-git')
 
 # Pakai $_pkgtag (bukan $pkgver) di URL supaya sesuai tag upstream yang asli
-source=("${pkgname}-${pkgver}.AppImage::${url}/releases/download/${_pkgtag}/PrismLauncher-Linux-x86_64.AppImage")
-sha256sums=('3feeace20f2e0aa5d0c74a79ae2789169b8357b02ab86558adc4ecf5758502c0')
+source=(
+  "${pkgname}-${pkgver}.AppImage::${url}/releases/download/${_pkgtag}/PrismLauncher-Linux-x86_64.AppImage"
+  "org.prismlauncher.PrismLauncher.svg"
+)
+sha256sums=(
+  '3feeace20f2e0aa5d0c74a79ae2789169b8357b02ab86558adc4ecf5758502c0'
+  'SKIP'
+)
 
 options=(!strip)
 
 package() {
-  local _appimage="${srcdir}/${pkgname}-${pkgver}.AppImage"
-  local _extract="${srcdir}/squashfs-root"
-
-  chmod +x "$_appimage"
-
   # Install AppImage binary
-  install -Dm755 "$_appimage" \
+  install -Dm755 "${srcdir}/${pkgname}-${pkgver}.AppImage" \
     "$pkgdir/usr/bin/prismlauncher-cracked"
 
-  # Extract AppImage contents to get icon
-  rm -rf "$_extract"
-  "$_appimage" --appimage-extract >/dev/null
-
-  # Install icon
-  if [[ -e "$_extract/.DirIcon" ]]; then
-    install -Dm644 "$(readlink -f "$_extract/.DirIcon")" \
-      "$pkgdir/usr/share/pixmaps/prismlauncher-cracked.png"
-  else
-    # fallback: cari icon png/svg pertama yang berhubungan dengan PrismLauncher
-    _icon_file="$(find "$_extract" -type f \( -iname '*.png' -o -iname '*.svg' \) | grep -Ei 'prism|launcher' | head -n1)"
-    if [[ -n "$_icon_file" ]]; then
-      case "${_icon_file##*.}" in
-        png)
-          install -Dm644 "$_icon_file" \
-            "$pkgdir/usr/share/pixmaps/prismlauncher-cracked.png"
-          ;;
-        svg)
-          install -Dm644 "$_icon_file" \
-            "$pkgdir/usr/share/icons/hicolor/scalable/apps/prismlauncher-cracked.svg"
-          ;;
-      esac
-    fi
-  fi
+  # Install icon dari SVG yang di-download
+  install -Dm644 "${srcdir}/prismlauncher-cracked.svg" \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/prismlauncher-cracked.svg"
 
   # Desktop entry
   cat > "$srcdir/prismlauncher-cracked.desktop" << EOF
