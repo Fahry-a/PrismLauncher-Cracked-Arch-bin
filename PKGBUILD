@@ -4,6 +4,10 @@
 pkgname=prismlauncher-cracked-bin
 pkgver=9.1
 pkgrel=1
+# _pkgtag = raw upstream tag (bisa mengandung 'v' prefix / hyphen)
+# dipisah dari pkgver karena pkgver tidak boleh mengandung '-' atau '/'
+# GitHub Actions akan auto-update kedua variabel ini setiap ada release baru
+_pkgtag=v9.1
 pkgdesc="PrismLauncher with offline/cracked account support (pre-built binary)"
 arch=('x86_64')
 url="https://github.com/Diegiwg/PrismLauncher-Cracked"
@@ -16,9 +20,8 @@ optdepends=(
 provides=('prismlauncher')
 conflicts=('prismlauncher' 'prismlauncher-bin' 'prismlauncher-git')
 
-# URL template — GitHub Actions akan auto-update pkgver di atas,
-# sehingga source URL ini otomatis ikut terupdate.
-source=("${pkgname}-${pkgver}.AppImage::${url}/releases/download/v${pkgver}/PrismLauncher-Linux-x86_64.AppImage")
+# Pakai $_pkgtag (bukan $pkgver) di URL supaya sesuai tag upstream yang asli
+source=("${pkgname}-${pkgver}.AppImage::${url}/releases/download/${_pkgtag}/PrismLauncher-Linux-x86_64.AppImage")
 sha256sums=('SKIP')  # updpkgsums akan isi ini otomatis
 
 options=(!strip)

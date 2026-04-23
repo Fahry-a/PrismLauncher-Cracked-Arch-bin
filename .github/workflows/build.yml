@@ -58,9 +58,16 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             | jq -r '.tag_name')
 
-          # Strip leading 'v' kalau ada (misal v9.1 → 9.1)
-          UPSTREAM_VER="${UPSTREAM_TAG#v}"
-          echo "Upstream version: $UPSTREAM_VER"
+          echo "Raw upstream tag: $UPSTREAM_TAG"
+
+          # Strip leading 'v' (v9.1 → 9.1)
+          STRIPPED="${UPSTREAM_TAG#v}"
+
+          # Sanitize: pkgver tidak boleh mengandung ':', '/', '-', atau spasi
+          # Ganti '-' dengan '.', hapus karakter lain yang invalid
+          UPSTREAM_VER=$(echo "$STRIPPED" | tr '-' '.' | tr -cd '[:alnum:]._+')
+
+          echo "Sanitized pkgver: $UPSTREAM_VER"
 
           # Baca pkgver saat ini dari PKGBUILD
           CURRENT_VER=$(grep -Po '(?<=^pkgver=)[^\s]+' PKGBUILD)
@@ -71,7 +78,7 @@ jobs:
 
           if [[ "$UPSTREAM_VER" != "$CURRENT_VER" || "${{ inputs.force_rebuild }}" == "true" ]]; then
             echo "should_build=true" >> "$GITHUB_OUTPUT"
-            echo "✅ New version detected or force rebuild — will build $UPSTREAM_VER"
+            echo "✅ New version detected or force rebuild — will build $UPSTREAM_VER (tag: $UPSTREAM_TAG)"
           else
             echo "should_build=false" >> "$GITHUB_OUTPUT"
             echo "⏭️  Already up-to-date ($CURRENT_VER), skipping."
@@ -82,15 +89,24 @@ jobs:
         if: steps.check.outputs.should_build == 'true'
         run: |
           NEW_VER="${{ steps.check.outputs.new_version }}"
+          RAW_TAG="${{ steps.check.outputs.upstream_tag }}"
 
-          # Update pkgver
+          # Update pkgver (versi yang sudah disanitize, tanpa karakter invalid)
           sed -i "s/^pkgver=.*/pkgver=$NEW_VER/" PKGBUILD
 
           # Reset pkgrel ke 1 saat versi upstream berubah
           sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
 
+          # Update _pkgtag — dipakai di source= untuk URL download yang menggunakan tag asli
+          # Kalau belum ada, tambahkan setelah baris pkgrel=
+          if grep -q '^_pkgtag=' PKGBUILD; then
+            sed -i "s|^_pkgtag=.*|_pkgtag=$RAW_TAG|" PKGBUILD
+          else
+            sed -i "/^pkgrel=/a _pkgtag=$RAW_TAG" PKGBUILD
+          fi
+
           echo "Updated PKGBUILD:"
-          grep -E '^(pkgver|pkgrel)=' PKGBUILD
+          grep -E '^(pkgver|pkgrel|_pkgtag)=' PKGBUILD
 
       - name: Update checksums (updpkgsums)
         if: steps.check.outputs.should_build == 'true'
