@@ -157,34 +157,54 @@ jobs:
           git push
 
       # ── Upload ke GitHub Release ────────────────────────────────────────────
-      - name: Create or update GitHub Release
+      # Pakai tag fixed "repo" supaya Server URL di pacman.conf tidak pernah berubah
+      - name: Update fixed "repo" release
         if: steps.check.outputs.should_build == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.check.outputs.new_version }}
-          name: PrismLauncher Cracked ${{ steps.check.outputs.new_version }}
+          tag_name: repo
+          name: Pacman Repo (latest)
           body: |
-            ## PrismLauncher Cracked `${{ steps.check.outputs.new_version }}`
+            ## Pacman Repo — PrismLauncher Cracked
 
-            Built from upstream: [Diegiwg/PrismLauncher-Cracked@${{ steps.check.outputs.new_version }}](https://github.com/Diegiwg/PrismLauncher-Cracked/releases/tag/v${{ steps.check.outputs.new_version }})
+            > **Versi saat ini:** `${{ steps.check.outputs.new_version }}`
+            > Built from: [Diegiwg/PrismLauncher-Cracked@${{ steps.check.outputs.upstream_tag }}](https://github.com/Diegiwg/PrismLauncher-Cracked/releases/tag/${{ steps.check.outputs.upstream_tag }})
 
-            ### Cara pakai (tambahkan repo ke `/etc/pacman.conf`):
+            ### Setup (sekali saja, tidak perlu diubah lagi saat update)
+
+            Tambahkan ke `/etc/pacman.conf`:
             ```ini
             [prism-cracked]
             SigLevel = Optional TrustAll
-            Server = https://github.com/${{ github.repository }}/releases/download/v${{ steps.check.outputs.new_version }}
+            Server = https://github.com/${{ github.repository }}/releases/download/repo
             ```
 
-            Lalu:
+            Lalu install:
             ```bash
             sudo pacman -Sy prismlauncher-cracked-bin
             ```
           files: |
             repo/*.pkg.tar.zst
             repo/prism-cracked.db.tar.gz
-            repo/prism-cracked.db.tar.gz.old
             repo/prism-cracked.files.tar.gz
+          # overwrite file lama di release yang sama
           make_latest: true
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Release per-versi tetap dibuat sebagai arsip (opsional, bisa dihapus)
+      - name: Create versioned release (archive)
+        if: steps.check.outputs.should_build == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.check.outputs.new_version }}
+          name: PrismLauncher Cracked ${{ steps.check.outputs.new_version }}
+          body: |
+            Built from upstream tag `${{ steps.check.outputs.upstream_tag }}`.
+            Untuk instalasi, gunakan repo di tag `repo`.
+          files: |
+            repo/*.pkg.tar.zst
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
