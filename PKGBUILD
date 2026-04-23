@@ -37,8 +37,7 @@ package() {
   install -Dm755 "${srcdir}/${pkgname}-${pkgver}.AppImage" \
     "$pkgdir/usr/bin/prismlauncher-cracked"
 
-  # Install icon dari SVG yang di-download
-  install -Dm644 "${srcdir}/prismlauncher-cracked.svg" \
+  install -Dm644 "${srcdir}/org.prismlauncher.PrismLauncher.svg" \
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/prismlauncher-cracked.svg"
 
   # Desktop entry
