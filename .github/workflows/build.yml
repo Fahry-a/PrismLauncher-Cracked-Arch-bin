@@ -46,7 +46,11 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Fix workspace permissions
-        run: chown -R builder:builder $GITHUB_WORKSPACE
+        run: |
+          chown -R builder:builder $GITHUB_WORKSPACE
+          # Tandai semua directory sebagai safe (root & builder di container)
+          git config --global --add safe.directory '*'
+          su builder -c "git config --global --add safe.directory '*'"
 
       # ── Version check ───────────────────────────────────────────────────────
       - name: Check latest upstream version
@@ -142,6 +146,8 @@ jobs:
       - name: Commit PKGBUILD changes
         if: steps.check.outputs.should_build == 'true'
         run: |
+          # Git menolak repo yang di-own UID berbeda (container security)
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           cd "$GITHUB_WORKSPACE"
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
