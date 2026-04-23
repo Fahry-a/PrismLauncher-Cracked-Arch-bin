@@ -139,10 +139,11 @@ jobs:
           cd $GITHUB_WORKSPACE/repo
           repo-add prism-cracked.db.tar.gz *.pkg.tar.zst
 
-          # repo-add hanya buat symlink .db → .db.tar.gz
-          # GitHub Releases tidak upload symlink, jadi copy sebagai file biasa
-          cp -L prism-cracked.db.tar.gz prism-cracked.db
-          cp -L prism-cracked.files.tar.gz prism-cracked.files
+          # repo-add buat hard link .db → .db.tar.gz (same inode)
+          # pacman butuh file bernama .db, jadi unlink dulu lalu copy
+          rm -f prism-cracked.db prism-cracked.files
+          cp prism-cracked.db.tar.gz prism-cracked.db
+          cp prism-cracked.files.tar.gz prism-cracked.files
 
           echo "Repo contents:"
           ls -lh
