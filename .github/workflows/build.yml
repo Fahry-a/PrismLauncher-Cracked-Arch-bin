@@ -139,6 +139,11 @@ jobs:
           cd $GITHUB_WORKSPACE/repo
           repo-add prism-cracked.db.tar.gz *.pkg.tar.zst
 
+          # repo-add hanya buat symlink .db → .db.tar.gz
+          # GitHub Releases tidak upload symlink, jadi copy sebagai file biasa
+          cp -L prism-cracked.db.tar.gz prism-cracked.db
+          cp -L prism-cracked.files.tar.gz prism-cracked.files
+
           echo "Repo contents:"
           ls -lh
 
@@ -186,7 +191,9 @@ jobs:
           files: |
             repo/*.pkg.tar.zst
             repo/prism-cracked.db.tar.gz
+            repo/prism-cracked.db
             repo/prism-cracked.files.tar.gz
+            repo/prism-cracked.files
           # overwrite file lama di release yang sama
           make_latest: true
           fail_on_unmatched_files: false
