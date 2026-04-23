@@ -1,6 +1,9 @@
 name: Update & Build Pacman Repo
 
 on:
+  push:
+    branches:
+      - '**'
   schedule:
     - cron: '0 */6 * * *'   # cek setiap 6 jam
   workflow_dispatch:          # bisa trigger manual juga
