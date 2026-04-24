@@ -25,10 +25,8 @@ source=(
   "${pkgname}-${pkgver}.AppImage::${url}/releases/download/${_pkgtag}/PrismLauncher-Linux-x86_64.AppImage"
   "org.prismlauncher.PrismLauncher.svg"
 )
-sha256sums=(
-  '3feeace20f2e0aa5d0c74a79ae2789169b8357b02ab86558adc4ecf5758502c0'
-  'SKIP'
-)
+sha256sums=('3feeace20f2e0aa5d0c74a79ae2789169b8357b02ab86558adc4ecf5758502c0'
+            '7af1b815d3cf6a3b9880df4bf656b1076f3d31dabaaa49d52bdfcea61440d933')
 
 options=(!strip)
 
