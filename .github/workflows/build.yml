@@ -185,7 +185,7 @@ jobs:
             ```ini
             [prism-cracked]
             SigLevel = Optional TrustAll
-            Server = https://github.com/${{ github.repository }}/releases/download/repo
+            Server = https://repo.oryn.my.id
             ```
 
             Lalu install:
