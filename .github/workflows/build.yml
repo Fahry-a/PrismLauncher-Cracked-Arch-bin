@@ -6,7 +6,7 @@ on:
       - '**'
   schedule:
     - cron: '0 */6 * * *'   # cek setiap 6 jam
-  workflow_dispatch:          # bisa trigger manual juga
+  workflow_dispatch:
     inputs:
       force_rebuild:
         description: 'Force rebuild even if version is the same'
@@ -14,34 +14,34 @@ on:
         default: false
 
 permissions:
-  contents: write   # butuh untuk push ke releases
+  contents: write
 
 jobs:
   check-and-build:
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
-      options: --privileged   # butuh untuk makepkg fakeroot
+      options: --privileged
 
     outputs:
-      new_version: ${{ steps.check.outputs.new_version }}
-      should_build: ${{ steps.check.outputs.should_build }}
+      new_version:     ${{ steps.check.outputs.new_version }}
+      upstream_tag:    ${{ steps.check.outputs.upstream_tag }}
+      should_build:    ${{ steps.check.outputs.should_build }}
+      version_changed: ${{ steps.check.outputs.version_changed }}
 
     steps:
-      # ── Setup Arch environment ──────────────────────────────────────────────
+      # ── Setup Arch environment ───────────────────────────────────────────────
       - name: Setup Arch dependencies
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm \
             git base-devel curl jq wget \
-            pacman-contrib sudo
+            pacman-contrib sudo python3
 
       - name: Create build user (makepkg cannot run as root)
         run: |
           useradd -m builder
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-          # beri akses ke workspace
-          chown -R builder:builder /home/runner 2>/dev/null || true
 
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -51,15 +51,13 @@ jobs:
       - name: Fix workspace permissions
         run: |
           chown -R builder:builder $GITHUB_WORKSPACE
-          # Tandai semua directory sebagai safe (root & builder di container)
           git config --global --add safe.directory '*'
           su builder -c "git config --global --add safe.directory '*'"
 
-      # ── Version check ───────────────────────────────────────────────────────
+      # ── Version check ────────────────────────────────────────────────────────
       - name: Check latest upstream version
         id: check
         run: |
-          # Ambil latest tag dari upstream
           UPSTREAM_TAG=$(curl -sL \
             "https://api.github.com/repos/Diegiwg/PrismLauncher-Cracked/releases/latest" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
@@ -67,45 +65,44 @@ jobs:
 
           echo "Raw upstream tag: $UPSTREAM_TAG"
 
-          # Strip leading 'v' (v9.1 → 9.1)
           STRIPPED="${UPSTREAM_TAG#v}"
-
-          # Sanitize: pkgver tidak boleh mengandung ':', '/', '-', atau spasi
-          # Ganti '-' dengan '.', hapus karakter lain yang invalid
           UPSTREAM_VER=$(echo "$STRIPPED" | tr '-' '.' | tr -cd '[:alnum:]._+')
-
           echo "Sanitized pkgver: $UPSTREAM_VER"
 
-          # Baca pkgver saat ini dari PKGBUILD
           CURRENT_VER=$(grep -Po '(?<=^pkgver=)[^\s]+' PKGBUILD)
           echo "Current pkgver:   $CURRENT_VER"
 
-          echo "new_version=$UPSTREAM_VER" >> "$GITHUB_OUTPUT"
+          echo "new_version=$UPSTREAM_VER"  >> "$GITHUB_OUTPUT"
           echo "upstream_tag=$UPSTREAM_TAG" >> "$GITHUB_OUTPUT"
 
-          if [[ "$UPSTREAM_VER" != "$CURRENT_VER" || "${{ inputs.force_rebuild }}" == "true" ]]; then
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
-            echo "✅ New version detected or force rebuild — will build $UPSTREAM_VER (tag: $UPSTREAM_TAG)"
+          VERSION_CHANGED="false"
+          SHOULD_BUILD="false"
+
+          if [[ "$UPSTREAM_VER" != "$CURRENT_VER" ]]; then
+            VERSION_CHANGED="true"
+            SHOULD_BUILD="true"
+            echo "✅ New version detected — will build $UPSTREAM_VER (was $CURRENT_VER)"
+          elif [[ "${{ inputs.force_rebuild }}" == "true" ]]; then
+            SHOULD_BUILD="true"
+            echo "🔁 Force rebuild at current version $CURRENT_VER"
           else
-            echo "should_build=false" >> "$GITHUB_OUTPUT"
             echo "⏭️  Already up-to-date ($CURRENT_VER), skipping."
           fi
 
-      # ── Update PKGBUILD ─────────────────────────────────────────────────────
-      - name: Update PKGBUILD pkgver & checksums
-        if: steps.check.outputs.should_build == 'true'
+          echo "version_changed=$VERSION_CHANGED" >> "$GITHUB_OUTPUT"
+          echo "should_build=$SHOULD_BUILD"       >> "$GITHUB_OUTPUT"
+
+      # ── Update PKGBUILD ──────────────────────────────────────────────────────
+      # Hanya jalankan saat versi benar-benar berubah (bukan force_rebuild)
+      - name: Update PKGBUILD pkgver & _pkgtag
+        if: steps.check.outputs.version_changed == 'true'
         run: |
           NEW_VER="${{ steps.check.outputs.new_version }}"
           RAW_TAG="${{ steps.check.outputs.upstream_tag }}"
 
-          # Update pkgver (versi yang sudah disanitize, tanpa karakter invalid)
           sed -i "s/^pkgver=.*/pkgver=$NEW_VER/" PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/"        PKGBUILD
 
-          # Reset pkgrel ke 1 saat versi upstream berubah
-          sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
-
-          # Update _pkgtag — dipakai di source= untuk URL download yang menggunakan tag asli
-          # Kalau belum ada, tambahkan setelah baris pkgrel=
           if grep -q '^_pkgtag=' PKGBUILD; then
             sed -i "s|^_pkgtag=.*|_pkgtag=$RAW_TAG|" PKGBUILD
           else
@@ -115,30 +112,59 @@ jobs:
           echo "Updated PKGBUILD:"
           grep -E '^(pkgver|pkgrel|_pkgtag)=' PKGBUILD
 
-      - name: Update checksums (updpkgsums)
+      # ── Download AppImage & hitung ulang checksum ────────────────────────────
+      # Dilakukan manual supaya makepkg tidak perlu download ulang saat build,
+      # sekaligus menggantikan updpkgsums yang selalu download semua sources.
+      - name: Download AppImage & update sha256sums
         if: steps.check.outputs.should_build == 'true'
-        run: su builder -c "cd $GITHUB_WORKSPACE && updpkgsums"
+        run: |
+          NEW_VER="${{ steps.check.outputs.new_version }}"
+          RAW_TAG="${{ steps.check.outputs.upstream_tag }}"
+          PKGNAME="prismlauncher-cracked-bin"
+          APPIMAGE_FILE="${PKGNAME}-${NEW_VER}.AppImage"
+          URL="https://github.com/Diegiwg/PrismLauncher-Cracked/releases/download/${RAW_TAG}/PrismLauncher-Linux-x86_64.AppImage"
 
-      # ── Build package ───────────────────────────────────────────────────────
+          echo "Downloading AppImage: $URL"
+          wget -q --show-progress "$URL" -O "$GITHUB_WORKSPACE/$APPIMAGE_FILE"
+
+          APPIMAGE_SHA=$(sha256sum "$GITHUB_WORKSPACE/$APPIMAGE_FILE"                        | awk '{print $1}')
+          SVG_SHA=$(sha256sum     "$GITHUB_WORKSPACE/org.prismlauncher.PrismLauncher.svg"    | awk '{print $1}')
+          INSTALL_SHA=$(sha256sum "$GITHUB_WORKSPACE/prismlauncher-cracked-bin.install"      | awk '{print $1}')
+
+          echo "Checksums:"
+          echo "  AppImage : $APPIMAGE_SHA"
+          echo "  SVG      : $SVG_SHA"
+          echo "  Install  : $INSTALL_SHA"
+
+          # Tulis blok sha256sums baru ke file sementara lalu replace di PKGBUILD
+          echo "sha256sums=('${APPIMAGE_SHA}'" > /tmp/new_sums.txt
+          echo "            '${SVG_SHA}'" >> /tmp/new_sums.txt
+          echo "            '${INSTALL_SHA}')" >> /tmp/new_sums.txt
+
+          # Replace sha256sums block in PKGBUILD using Python (single line to avoid YAML issues)
+          python3 -c "import re; new_block=open('/tmp/new_sums.txt').read().strip(); content=open('PKGBUILD').read(); content=re.sub(r'sha256sums=\([^)]*\)', new_block, content, flags=re.DOTALL); open('PKGBUILD','w').write(content); print('sha256sums updated successfully')"
+
+          # Pastikan AppImage bisa diakses oleh builder saat makepkg
+          chown builder:builder "$GITHUB_WORKSPACE/$APPIMAGE_FILE"
+
+      # ── Build package ────────────────────────────────────────────────────────
       - name: Build package with makepkg
         if: steps.check.outputs.should_build == 'true'
         run: |
+          # AppImage sudah ada di workspace — makepkg tidak akan download ulang
           su builder -c "cd $GITHUB_WORKSPACE && makepkg -s --noconfirm --noprogressbar"
 
       - name: List built packages
         if: steps.check.outputs.should_build == 'true'
         run: ls -lh $GITHUB_WORKSPACE/*.pkg.tar.zst
 
-      # ── Build pacman repo DB ────────────────────────────────────────────────
+      # ── Build pacman repo DB ─────────────────────────────────────────────────
       - name: Create pacman repo database
         if: steps.check.outputs.should_build == 'true'
         run: |
           mkdir -p $GITHUB_WORKSPACE/repo
-
-          # Copy packages ke folder repo
           cp $GITHUB_WORKSPACE/*.pkg.tar.zst $GITHUB_WORKSPACE/repo/
 
-          # Buat .db dan .files
           cd $GITHUB_WORKSPACE/repo
           repo-add prism-cracked.db.tar.gz *.pkg.tar.zst
 
@@ -151,11 +177,11 @@ jobs:
           echo "Repo contents:"
           ls -lh
 
-      # ── Commit updated PKGBUILD ─────────────────────────────────────────────
+      # ── Commit PKGBUILD ──────────────────────────────────────────────────────
+      # Hanya commit saat versi berubah supaya tidak ada noise commit
       - name: Commit PKGBUILD changes
-        if: steps.check.outputs.should_build == 'true'
+        if: steps.check.outputs.version_changed == 'true'
         run: |
-          # Git menolak repo yang di-own UID berbeda (container security)
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           cd "$GITHUB_WORKSPACE"
           git config user.name  "github-actions[bot]"
@@ -165,14 +191,17 @@ jobs:
             git commit -m "chore: bump pkgver to ${{ steps.check.outputs.new_version }}"
           git push
 
-      # ── Upload ke GitHub Release ────────────────────────────────────────────
-      # Pakai tag fixed "repo" supaya Server URL di pacman.conf tidak pernah berubah
+      # ── Upload ke GitHub Release ─────────────────────────────────────────────
+      # Tag "repo" = fixed URL untuk pacman.conf, tidak pernah berubah.
+      # make_latest: false supaya tidak menggeser versioned release sebagai "Latest".
       - name: Update fixed "repo" release
         if: steps.check.outputs.should_build == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: repo
           name: Pacman Repo (latest)
+          make_latest: false
+          prerelease: true
           body: |
             ## Pacman Repo — PrismLauncher Cracked
 
@@ -198,19 +227,19 @@ jobs:
             repo/prism-cracked.db
             repo/prism-cracked.files.tar.gz
             repo/prism-cracked.files
-          # overwrite file lama di release yang sama
-          make_latest: true
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Release per-versi tetap dibuat sebagai arsip (opsional, bisa dihapus)
+      # Release per-versi hanya dibuat saat versi benar-benar berubah,
+      # sehingga force_rebuild tidak menyebabkan konflik tag yang sudah ada.
       - name: Create versioned release (archive)
-        if: steps.check.outputs.should_build == 'true'
+        if: steps.check.outputs.version_changed == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.check.outputs.new_version }}
           name: PrismLauncher Cracked ${{ steps.check.outputs.new_version }}
+          make_latest: true
           body: |
             Built from upstream tag `${{ steps.check.outputs.upstream_tag }}`.
             Untuk instalasi, gunakan repo di tag `repo`.
